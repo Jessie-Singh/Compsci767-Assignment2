@@ -1,6 +1,6 @@
-langchain
-langchain-openai
-openai
-pandas
-matplotlib
-python-dotenv
+langchain>=0.0.300
+langchain-openai>=0.0.1
+openai>=1.0.0
+pandas>=1.5.0
+matplotlib>=3.5.0
+python-dotenv>=0.21.0

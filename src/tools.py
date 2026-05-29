@@ -12,15 +12,15 @@ def load_csv(csv_path: str) -> str:
         memory.csv_path = csv_path
         memory.df = pd.read_csv(csv_path)
         rows, cols = memory.df.shape
-        return f"✅ Loaded {csv_path}\n   📊 Shape: {rows} rows × {cols} columns\n   📋 Columns: {', '.join(memory.df.columns)}"
+        return f"Loaded {csv_path}\n   Shape: {rows} rows × {cols} columns\n   Columns: {', '.join(memory.df.columns)}"
     except Exception as e:
-        return f"❌ Error loading CSV: {str(e)}"
+        return f"Error loading CSV: {str(e)}"
 
 
 def inspect_data() -> str:
     """Inspect data types, missing values, numeric columns, and categorical columns."""
     if memory.df is None:
-        return "❌ No CSV has been loaded yet."
+        return "No CSV has been loaded yet."
 
     numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
     categorical_cols = memory.df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
@@ -28,9 +28,9 @@ def inspect_data() -> str:
     missing = memory.df.isnull().sum()
     missing = missing[missing > 0].to_dict()
 
-    result = f"🔢 Numeric columns ({len(numeric_cols)}): {', '.join(numeric_cols) if numeric_cols else 'None'}\n"
-    result += f"📝 Categorical columns ({len(categorical_cols)}): {', '.join(categorical_cols) if categorical_cols else 'None'}\n"
-    result += f"❓ Missing values: {missing if missing else 'None'}"
+    result = f"Numeric columns ({len(numeric_cols)}): {', '.join(numeric_cols) if numeric_cols else 'None'}\n"
+    result += f"Categorical columns ({len(categorical_cols)}): {', '.join(categorical_cols) if categorical_cols else 'None'}\n"
+    result += f"Missing values: {missing if missing else 'None'}"
 
     memory.findings.append("Data inspection completed")
     return result
@@ -39,12 +39,12 @@ def inspect_data() -> str:
 def missing_value_report() -> str:
     """Report missing values and their percentages."""
     if memory.df is None:
-        return "❌ No CSV has been loaded yet."
+        return "No CSV has been loaded yet."
 
     missing = memory.df.isnull().sum()
     missing = missing[missing > 0]
     if missing.empty:
-        return "✅ No missing values found."
+        return "No missing values found."
 
     missing_pct = (missing / len(memory.df) * 100).round(2)
     rows = [f"{col}: {count} missing ({missing_pct[col]}%)" for col, count in missing.items()]
@@ -56,12 +56,12 @@ def missing_value_report() -> str:
 def summary_statistics() -> str:
     """Generate summary statistics for numeric columns."""
     if memory.df is None:
-        return "❌ No CSV has been loaded yet."
+        return "No CSV has been loaded yet."
 
     numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
 
     if not numeric_cols:
-        return "❌ No numeric columns found for statistics."
+        return "No numeric columns found for statistics."
 
     stats = memory.df[numeric_cols].describe()
     result = "📊 Summary Statistics:\n" + str(stats)
@@ -73,11 +73,11 @@ def summary_statistics() -> str:
 def category_counts() -> str:
     """Display top category counts for categorical columns."""
     if memory.df is None:
-        return "❌ No CSV has been loaded yet."
+        return "No CSV has been loaded yet."
 
     categorical_cols = memory.df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
     if not categorical_cols:
-        return "❌ No categorical columns found."
+        return "No categorical columns found."
 
     outputs = []
     for col in categorical_cols:
@@ -91,12 +91,12 @@ def category_counts() -> str:
 def create_histograms() -> str:
     """Create histogram plots for numeric columns."""
     if memory.df is None:
-        return "❌ No CSV has been loaded yet."
+        return "No CSV has been loaded yet."
 
     numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
 
     if not numeric_cols:
-        return "❌ No numeric columns found for plotting."
+        return "No numeric columns found for plotting."
 
     plots_created = []
     for col in numeric_cols[:5]:  # Limit to first 5 columns to avoid too many plots
@@ -120,11 +120,11 @@ def create_histograms() -> str:
 def correlation_heatmap() -> str:
     """Create a correlation heatmap for numeric columns."""
     if memory.df is None:
-        return "❌ No CSV has been loaded yet."
+        return "No CSV has been loaded yet."
 
     numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
     if len(numeric_cols) < 2:
-        return "❌ Need at least two numeric columns for correlation analysis."
+        return "Need at least two numeric columns for correlation analysis."
 
     corr = memory.df[numeric_cols].corr()
     plt.figure(figsize=(8, 6))
@@ -141,7 +141,7 @@ def correlation_heatmap() -> str:
 
     memory.plots.append(filename)
     memory.findings.append("Correlation heatmap generated")
-    return f"📉 Correlation heatmap saved as {filename}"
+    return f"Correlation heatmap saved as {filename}"
 
 
 # Keep tools list for backward compatibility (though not used in non-LLM version)

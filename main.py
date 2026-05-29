@@ -16,7 +16,16 @@ def main():
         print("=" * 70)
         summary = agent.run(csv_path)
         print(summary)
-        print("\n✅ Agent run complete.")
+
+        while True:
+            print("\nYou can now ask a follow-up question, or press Enter to exit.")
+            question = input("Follow-up question: ").strip()
+            if not question:
+                break
+            answer = agent.follow_up(question)
+            print("\n" + answer)
+
+        print("\n✅ Agent session complete.")
     except Exception as e:
         print(f"❌ Error during analysis: {e}")
 
