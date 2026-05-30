@@ -35,7 +35,7 @@ def get_data_summary() -> str:
 
 
 class DataAnalysisAgent:
-    """An improved agent that uses OpenAI API plus local tool execution for CSV analysis."""
+    """An agent that uses OpenAI API plus local tool execution for CSV analysis."""
 
     TOOL_MAP = {
         "inspect_data": inspect_data,
@@ -109,6 +109,14 @@ class DataAnalysisAgent:
         self.actions = self.parse_action_list(decision_text)
         if not self.actions:
             self.actions = ["inspect_data", "summary_statistics"]
+
+        if memory.df is not None:
+            numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
+            if numeric_cols and "create_histograms" not in self.actions:
+                self.actions.append("create_histograms")
+            if len(numeric_cols) >= 2 and "correlation_heatmap" not in self.actions:
+                self.actions.append("correlation_heatmap")
+
         self.findings.append(f"LLM Decision: {', '.join(self.actions)}")
         return self.actions
 
@@ -226,7 +234,7 @@ class DataAnalysisAgent:
 
     def run(self, csv_path: str) -> str:
         """Execute the full perceive-decide-act-summarize cycle."""
-        print("🤖 Starting improved CSV analysis agent...\n")
+        print("🤖 Starting CSV analysis agent...\n")
         print("📥 Perceiving data...")
         self.perceive(csv_path)
 
