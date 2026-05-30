@@ -126,3 +126,7 @@ To reproduce the exact analysis flow shown in this repository:
 6. Review the printed analysis summary and generated images
 
 Generated output files may include histogram and heatmap PNGs in the repository root.
+
+Demo Video: https://github.com/user-attachments/assets/222a82f0-254a-4498-ad16-949199f42e3b
+
+
