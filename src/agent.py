@@ -2,16 +2,7 @@ import json
 import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from src.tools import (
-    memory,
-    load_csv,
-    inspect_data,
-    missing_value_report,
-    summary_statistics,
-    category_counts,
-    create_histograms,
-    correlation_heatmap,
-)
+from src.tools import memory, load_csv, TOOL_REGISTRY, TOOL_ALIASES
 
 load_dotenv()
 
@@ -20,6 +11,7 @@ def get_data_summary() -> str:
     """Get a quick summary of the loaded data (shape, columns, types)."""
     if memory.df is None:
         return "No CSV has been loaded yet."
+
     rows, cols = memory.df.shape
     numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
     categorical_cols = memory.df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
@@ -37,13 +29,10 @@ def get_data_summary() -> str:
 class DataAnalysisAgent:
     """An agent that uses OpenAI API plus local tool execution for CSV analysis."""
 
-    TOOL_MAP = {
-        "inspect_data": inspect_data,
-        "missing_value_report": missing_value_report,
-        "summary_statistics": summary_statistics,
-        "category_counts": category_counts,
-        "create_histograms": create_histograms,
-        "correlation_heatmap": correlation_heatmap,
+    TOOL_MAP = TOOL_REGISTRY
+    TOOL_DESCRIPTIONS = {
+        name: (tool.__doc__ or "").strip().replace("\n", " ")
+        for name, tool in TOOL_REGISTRY.items()
     }
 
     def __init__(self):
@@ -65,21 +54,32 @@ class DataAnalysisAgent:
     def parse_action_list(self, text: str) -> list[str]:
         """Parse a list of tool action names from an LLM response."""
         text = text.strip()
+
         try:
             candidate = json.loads(text)
             if isinstance(candidate, list):
-                return [str(item).strip() for item in candidate if isinstance(item, (str, int))]
+                actions = []
+                for item in candidate:
+                    if not isinstance(item, (str, int)):
+                        continue
+                    action = str(item).strip().lower()
+                    for key, aliases in TOOL_ALIASES.items():
+                        if action in aliases:
+                            action = key
+                            break
+                    if action in self.TOOL_MAP and action not in actions:
+                        actions.append(action)
+                return actions
         except json.JSONDecodeError:
             pass
 
-        lines = [line.strip(" -•*") for line in text.splitlines() if line.strip()]
+        lower_text = text.lower()
         actions = []
-        for line in lines:
-            token = line.split()[0].strip().lower()
-            if token in self.TOOL_MAP:
-                actions.append(token)
-            elif "," in line:
-                actions.extend([part.strip().lower() for part in line.split(",") if part.strip().lower() in self.TOOL_MAP])
+        for key, aliases in TOOL_ALIASES.items():
+            for alias in aliases:
+                if alias in lower_text and key not in actions:
+                    actions.append(key)
+                    break
         return actions
 
     def decide(self) -> list[str]:
@@ -87,35 +87,36 @@ class DataAnalysisAgent:
         if memory.df is None:
             return []
 
-        data_summary = get_data_summary()
+        available_actions = "\n".join(
+            f"- {name}: {description}"
+            for name, description in self.TOOL_DESCRIPTIONS.items()
+        )
         prompt = f"""
-            You are an intelligent data analysis agent. Based on the dataset summary below, choose the most useful analysis actions for this dataset.
+            You are an intelligent data analysis assistant. Based on the dataset summary below, choose the most useful analysis actions for this dataset.
 
             Available actions:
-            - inspect_data
-            - missing_value_report
-            - summary_statistics
-            - category_counts
-            - create_histograms
-            - correlation_heatmap
+            {available_actions}
 
             Dataset summary:
-            {data_summary}
+            {get_data_summary()}
 
             Return only a JSON array with the selected action names in order. Example:
-            ["inspect_data", "summary_statistics", "create_histograms"]
+            [\"inspect_data\", \"summary_statistics\", \"create_histograms\"]
             """
         decision_text = self.llm.invoke(prompt).content
-        self.actions = self.parse_action_list(decision_text)
-        if not self.actions:
-            self.actions = ["inspect_data", "summary_statistics"]
+        selected = self.parse_action_list(decision_text)
 
-        if memory.df is not None:
-            numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
-            if numeric_cols and "create_histograms" not in self.actions:
-                self.actions.append("create_histograms")
-            if len(numeric_cols) >= 2 and "correlation_heatmap" not in self.actions:
-                self.actions.append("correlation_heatmap")
+        baseline = ["inspect_data", "summary_statistics"]
+        self.actions = baseline.copy()
+        for action in selected:
+            if action not in self.actions:
+                self.actions.append(action)
+
+        numeric_cols = memory.df.select_dtypes(include="number").columns.tolist()
+        if numeric_cols and "create_histograms" not in self.actions:
+            self.actions.append("create_histograms")
+        if len(numeric_cols) >= 2 and "correlation_heatmap" not in self.actions:
+            self.actions.append("correlation_heatmap")
 
         self.findings.append(f"LLM Decision: {', '.join(self.actions)}")
         return self.actions
@@ -130,14 +131,14 @@ class DataAnalysisAgent:
 
         results = []
         for action in self.actions:
-            tool_func = self.TOOL_MAP.get(action)
-            if not tool_func:
+            tool_obj = self.TOOL_MAP.get(action)
+            if not tool_obj:
                 error_msg = f"Unknown action: {action}"
                 self.findings.append(error_msg)
                 results.append(error_msg)
                 continue
 
-            result = tool_func()
+            result = tool_obj()
             self.findings.append(result)
             results.append(result)
 
@@ -152,18 +153,25 @@ class DataAnalysisAgent:
         prompt = f"""
             You are an analytical assistant. Summarize the following CSV data analysis findings clearly and concisely.
 
+            Dataset summary:
+            {get_data_summary()}
+
+            Findings:
             {findings_text}
 
             Include:
-            1. Key data characteristics
-            2. Important patterns or anomalies
-            3. Recommendations for further analysis
+            1. Key data characteristics,
+            2. Important patterns or anomalies,
+            3. Any missing data or quality issues,
+            4. Recommendations for follow-up analysis.
+
+            Output a short list with bullet points.
             """
         summary_text = self.llm.invoke(prompt).content
         summary_lines = [
             "📊 Analysis Summary:",
             "=" * 50,
-            summary_text,
+            summary_text.strip(),
             "=" * 50,
         ]
         if memory.plots:
@@ -177,6 +185,10 @@ class DataAnalysisAgent:
             return "No data has been loaded. Please load a CSV first."
 
         findings_text = "\n\n".join(str(item) for item in self.findings)
+        available_actions = "\n".join(
+            f"- {name}: {description}"
+            for name, description in self.TOOL_DESCRIPTIONS.items()
+        )
         prompt = f"""
             You are a helpful data analysis assistant. A user has asked the follow-up question below about the dataset and the previous analysis findings.
 
@@ -187,12 +199,7 @@ class DataAnalysisAgent:
             {question}
 
             Decide whether you need additional analysis tools to answer the question accurately. Available tool actions are:
-            - inspect_data
-            - missing_value_report
-            - summary_statistics
-            - category_counts
-            - create_histograms
-            - correlation_heatmap
+            {available_actions}
 
             If further analysis is needed, return only a JSON array of action names to execute in order. If no additional tools are required, return [] only.
             """
@@ -202,10 +209,10 @@ class DataAnalysisAgent:
         extra_results = []
         if actions:
             for action in actions:
-                tool_func = self.TOOL_MAP.get(action)
-                if not tool_func:
+                tool_obj = self.TOOL_MAP.get(action)
+                if not tool_obj:
                     continue
-                result = tool_func()
+                result = tool_obj()
                 self.findings.append(result)
                 extra_results.append(f"[{action}] {result}")
 
