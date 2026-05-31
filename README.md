@@ -59,7 +59,7 @@ The agent keeps the dataset and findings in memory, so follow-ups are answered u
 Example follow-up sequence:
 
 ```text
-Follow-up question: What column has the strongest correlation with GPA?
+Follow-up question: What column has the strongest correlation with Grades?
 ```
 
 Press Enter on an empty prompt to exit.
