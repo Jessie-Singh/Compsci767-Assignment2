@@ -100,20 +100,6 @@ Press Enter on an empty prompt to exit.
 - Optionally runs more analysis
 - Generates a clear answer using prior findings and extra results
 
-## Example Usage
-
-```python
-from src.agent import DataAnalysisAgent
-
-agent = DataAnalysisAgent()
-summary = agent.run("data/Gaming_Academic_Performance.csv")
-print(summary)
-
-# then ask a follow-up
-answer = agent.follow_up("What is the biggest risk factor for low GPA?")
-print(answer)
-```
-
 ## Reproducible Results
 
 To reproduce the exact analysis flow shown in this repository:
