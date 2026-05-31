@@ -12,9 +12,11 @@ def main():
     agent = DataAnalysisAgent()
 
     try:
-        print(f"🔍 Starting agent for: {csv_path}")
+        print(f"\n🔍 Starting agent for: {csv_path}")
         print("=" * 70)
+
         summary = agent.run(csv_path)
+
         print(summary)
 
         while True:

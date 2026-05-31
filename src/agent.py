@@ -2,7 +2,7 @@ import json
 import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from src.tools import memory, load_csv, TOOL_REGISTRY, TOOL_ALIASES
+from src.tools import memory, load_csv, TOOL_REGISTRY, TOOL_ALIASES, dataset_context
 
 load_dotenv()
 
@@ -24,6 +24,27 @@ def get_data_summary() -> str:
         f"Categorical columns: {len(categorical_cols)}\n"
         f"Missing values: {missing_text}"
     )
+
+
+def get_data_context() -> str:
+    """Get a richer raw data context for the loaded CSV, including sample rows."""
+    if memory.df is None:
+        return "No CSV has been loaded yet."
+
+    cols = list(memory.df.columns)
+    types = memory.df.dtypes.astype(str).to_dict()
+    missing = memory.df.isnull().sum().to_dict()
+    sample_rows = memory.df.head(5).to_dict(orient="records")
+
+    lines = [
+        "Columns and types:",
+        "  " + ", ".join(f"{col} ({types[col]})" for col in cols),
+        "Missing values by column:",
+        "  " + ", ".join(f"{col}: {int(missing[col])}" for col in cols if missing[col] > 0) if any(missing[col] > 0 for col in cols) else "  None",
+        "Sample rows (first 5):",
+    ]
+    lines.extend(f"  {row}" for row in sample_rows)
+    return "\n".join(lines)
 
 
 class DataAnalysisAgent:
@@ -92,7 +113,7 @@ class DataAnalysisAgent:
             for name, description in self.TOOL_DESCRIPTIONS.items()
         )
         prompt = f"""
-            You are an intelligent data analysis assistant. Based on the dataset summary below, choose the most useful analysis actions for this dataset.
+            You are an intelligent data analysis assistant. Based on the dataset summary and raw data context below, choose the most useful analysis actions for this dataset.
 
             Available actions:
             {available_actions}
@@ -100,13 +121,22 @@ class DataAnalysisAgent:
             Dataset summary:
             {get_data_summary()}
 
+            Dataset context:
+            {get_data_context()}
+
+            Prefer tools that generate exact dataset metrics and high-level insights. For tabular data, include `data_insights` and `category_counts` when categorical data is available. Also prefer `query_dataset` for questions that need precise counts, group comparisons, or popularity information.
+
             Return only a JSON array with the selected action names in order. Example:
             [\"inspect_data\", \"summary_statistics\", \"create_histograms\"]
             """
         decision_text = self.llm.invoke(prompt).content
         selected = self.parse_action_list(decision_text)
 
-        baseline = ["inspect_data", "summary_statistics"]
+        categorical_cols = memory.df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+        baseline = ["inspect_data", "summary_statistics", "data_insights"]
+        if categorical_cols:
+            baseline.append("category_counts")
+
         self.actions = baseline.copy()
         for action in selected:
             if action not in self.actions:
@@ -156,6 +186,9 @@ class DataAnalysisAgent:
             Dataset summary:
             {get_data_summary()}
 
+            Dataset context:
+            {get_data_context()}
+
             Findings:
             {findings_text}
 
@@ -195,16 +228,26 @@ class DataAnalysisAgent:
             Previous analysis findings:
             {findings_text}
 
+            Dataset summary:
+            {get_data_summary()}
+
+            Dataset context:
+            {get_data_context()}
+
             Follow-up question:
             {question}
 
-            Decide whether you need additional analysis tools to answer the question accurately. Available tool actions are:
+            If the question requires exact numeric answers, comparisons, or dataset-specific details, return only a JSON array with tool names. Prefer `query_dataset` for exact counts, group statistics, distributions, comparisons, and anything that needs the full dataset. Use `data_insights` for broader exploration.
+            Available tool actions are:
             {available_actions}
 
             If further analysis is needed, return only a JSON array of action names to execute in order. If no additional tools are required, return [] only.
             """
         action_text = self.llm.invoke(prompt).content
         actions = self.parse_action_list(action_text)
+        fallback_keywords = ["count", "how many", "most popular", "popular", "top", "average", "median", "sum", "percentage", "proportion", "compare", "group", "distinct", "unique"]
+        if any(keyword in question.lower() for keyword in fallback_keywords) and "query_dataset" not in actions:
+            actions.append("query_dataset")
 
         extra_results = []
         if actions:
@@ -212,7 +255,7 @@ class DataAnalysisAgent:
                 tool_obj = self.TOOL_MAP.get(action)
                 if not tool_obj:
                     continue
-                result = tool_obj()
+                result = tool_obj(question) if action == "query_dataset" else tool_obj()
                 self.findings.append(result)
                 extra_results.append(f"[{action}] {result}")
 
@@ -238,6 +281,91 @@ class DataAnalysisAgent:
         self.findings.append(f"Follow-up: {question}")
         self.findings.append(answer_text)
         return answer_text
+
+    def explore(self, csv_path: str, max_iterations: int = 3) -> str:
+        """Run iterative autonomous exploration with hypothesis testing and dynamic tool selection.
+        
+        The agent analyzes the data, generates hypotheses, tests them with tools, and decides 
+        if deeper investigation is needed based on findings.
+        """
+        print("🤖 Starting autonomous CSV analysis agent...\n")
+        print("📥 Perceiving data...")
+        self.perceive(csv_path)
+
+        for iteration in range(max_iterations):
+            print(f"\n🔄 Exploration iteration {iteration + 1}/{max_iterations}")
+            
+            if iteration == 0:
+                print("🧠 Deciding initial analysis steps...")
+                self.decide()
+            else:
+                print("🔍 Generating new hypotheses from current findings...")
+                self._generate_targeted_analysis()
+
+            print(f"⚙️  Executing analysis tools...\n")
+            self.act()
+
+            if iteration < max_iterations - 1:
+                should_continue = self._should_continue_exploring()
+                if not should_continue:
+                    print("✅ Sufficient insights gathered; moving to summary.")
+                    break
+                else:
+                    print("🔎 More patterns detected; continuing exploration...")
+
+        print("\n✍️  Generating comprehensive summary...\n")
+        return self.summarize()
+
+    def _generate_targeted_analysis(self) -> None:
+        """Use the LLM to propose next analysis steps based on current findings."""
+        findings_text = "\n\n".join(str(item) for item in self.findings[-5:])
+        available_actions = "\n".join(
+            f"- {name}: {description}"
+            for name, description in self.TOOL_DESCRIPTIONS.items()
+        )
+        prompt = f"""
+            You are a data exploration expert. Based on the recent analysis findings and raw CSV context below, identify interesting patterns, anomalies, or questions that warrant deeper investigation.
+
+            Recent findings:
+            {findings_text}
+
+            Dataset summary:
+            {get_data_summary()}
+
+            Dataset context:
+            {get_data_context()}
+
+            Available tools:
+            {available_actions}
+
+            Generate 2-3 specific hypotheses or investigation targets, then recommend which tools would best test them. Return only a JSON array of action names (no hypotheses text):
+            [\"action1\", \"action2\"]
+            
+            Focus on tools not yet run or run differently. If no new insights are worth pursuing, return [].
+            """
+        response_text = self.llm.invoke(prompt).content
+        targeted_actions = self.parse_action_list(response_text)
+        
+        if targeted_actions:
+            self.findings.append(f"Targeted exploration: {', '.join(targeted_actions)}")
+            self.actions = targeted_actions
+        else:
+            self.actions = []
+
+    def _should_continue_exploring(self) -> bool:
+        """Decide if more exploration iterations would yield value."""
+        findings_text = "\n\n".join(str(item) for item in self.findings[-3:])
+        prompt = f"""
+            You are a data analysis director. Review the most recent findings below and decide if further exploration would likely uncover new insights or if we have sufficient understanding of the data.
+
+            Recent findings:
+            {findings_text}
+
+            Respond with only "yes" or "no".
+            """
+        response = self.llm.invoke(prompt).content.strip().lower()
+        should_continue = "yes" in response
+        return should_continue
 
     def run(self, csv_path: str) -> str:
         """Execute the full perceive-decide-act-summarize cycle."""
